@@ -1,0 +1,9 @@
+streamlit
+yfinance
+pandas
+numpy
+matplotlib
+ta
+scikit-learn
+tensorflow-cpu
+requests
