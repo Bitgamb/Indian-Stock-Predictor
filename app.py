@@ -78,6 +78,7 @@ if st.sidebar.button("Analyze & Predict"):
     with st.spinner(f"Fetching data and company info for {ticker}..."):
         
         # 1. Fetch Company Info
+        stock_info = {}  # <--- ADD THIS LINE HERE
         try:
             stock_info = yf.Ticker(ticker).info
             company_name = stock_info.get('longName', ticker)
@@ -85,6 +86,7 @@ if st.sidebar.button("Analyze & Predict"):
         except:
             company_name = ticker
             sector = "Unknown Sector"
+            
 
         # 2. Data Fetching
         data = yf.download(ticker, period=period, interval="1d")
@@ -311,4 +313,5 @@ if st.sidebar.button("Analyze & Predict"):
                     unsafe_allow_html=True
                 )
                 
+
             st.caption("\n\n*⚠️ **Disclaimer**: This summary is generated algorithmically based on technical indicators and AI models. Stock markets are highly volatile and influenced by unpredictable real-world news. Do not use this as your sole basis for financial trading or investment.*")
