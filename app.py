@@ -77,10 +77,10 @@ if st.sidebar.button("Analyze & Predict"):
         try:
             stock_info = yf.Ticker(ticker).info
             company_name = stock_info.get('longName', ticker)
-            sector = stock_info.get('sector', 'Unknown Sector')
+            sector = stock_info.get('sector', '') # Changed to empty string if missing
         except:
             company_name = ticker
-            sector = "Unknown Sector"
+            sector = ""
 
         # 2. Data Fetching
         data = yf.download(ticker, period=period, interval="1d")
@@ -103,7 +103,6 @@ if st.sidebar.button("Analyze & Predict"):
             percentage_change = (price_change / previous_price) * 100
             
             # --- Robust 52-Week High/Low Calculation ---
-            # YF '.info' often fails on cloud servers. If it does, we calculate it manually!
             high_52w = stock_info.get('fiftyTwoWeekHigh')
             low_52w = stock_info.get('fiftyTwoWeekLow')
             
@@ -120,7 +119,12 @@ if st.sidebar.button("Analyze & Predict"):
             low_display = f"₹ {low_52w:.2f}" if isinstance(low_52w, (int, float)) else "N/A"
 
             # --- UI: Top Dashboard Metrics ---
-            st.subheader(f"📊 {company_name} ({sector})")
+            # Cleanly handle missing sector info
+            if sector:
+                st.subheader(f"📊 {company_name} ({sector})")
+            else:
+                st.subheader(f"📊 {company_name}")
+                
             col1, col2, col3 = st.columns(3)
             with col1:
                 st.metric(label="Current Close Price", value=f"₹ {current_price:.2f}", delta=f"{price_change:.2f} ({percentage_change:.2f}%)")
