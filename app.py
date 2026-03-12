@@ -33,19 +33,15 @@ def fetch_indian_tickers():
     try:
         # Official NSE Equity Master List
         url = "https://archives.nseindia.com/content/equities/EQUITY_L.csv"
-        # Masking the request as a standard web browser so NSE doesn't block it
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
         }
         response = requests.get(url, headers=headers, timeout=10)
         
         if response.status_code == 200:
-            # Read the CSV into a Pandas DataFrame
             df = pd.read_csv(io.StringIO(response.text))
-            # Format it nicely: "Company Name (SYMBOL)"
             df['Display'] = df['NAME OF COMPANY'] + " (" + df['SYMBOL'] + ")"
             df['Ticker'] = df['SYMBOL'] + ".NS"
-            # Return as a dictionary mapping the Display Name to the Ticker
             return dict(zip(df['Display'], df['Ticker']))
         else:
             return fallback
@@ -64,7 +60,6 @@ input_method = st.sidebar.radio(
 )
 
 if input_method == "Search NSE Stocks (Auto-Dropdown)":
-    # The selectbox acts as an auto-search bar automatically!
     selected_company = st.sidebar.selectbox("Search & Select a Company:", list(nse_stocks.keys()))
     ticker = nse_stocks[selected_company]
 else:
@@ -77,8 +72,8 @@ period = st.sidebar.selectbox("Select Historical Data Period:", ["3mo", "6mo", "
 if st.sidebar.button("Analyze & Predict"):
     with st.spinner(f"Fetching data and company info for {ticker}..."):
         
-        # 1. Fetch Company Info
-        stock_info = {}  # <--- ADD THIS LINE HERE
+        # 1. Fetch Company Info (Cloud-Safe)
+        stock_info = {} # Prevents NameError if yfinance fails
         try:
             stock_info = yf.Ticker(ticker).info
             company_name = stock_info.get('longName', ticker)
@@ -86,7 +81,6 @@ if st.sidebar.button("Analyze & Predict"):
         except:
             company_name = ticker
             sector = "Unknown Sector"
-            
 
         # 2. Data Fetching
         data = yf.download(ticker, period=period, interval="1d")
@@ -108,15 +102,32 @@ if st.sidebar.button("Analyze & Predict"):
             price_change = current_price - previous_price
             percentage_change = (price_change / previous_price) * 100
             
+            # --- Robust 52-Week High/Low Calculation ---
+            # YF '.info' often fails on cloud servers. If it does, we calculate it manually!
+            high_52w = stock_info.get('fiftyTwoWeekHigh')
+            low_52w = stock_info.get('fiftyTwoWeekLow')
+            
+            if high_52w is None or low_52w is None:
+                try:
+                    history_1y = yf.Ticker(ticker).history(period="1y")
+                    high_52w = history_1y['High'].max()
+                    low_52w = history_1y['Low'].min()
+                except:
+                    high_52w = "N/A"
+                    low_52w = "N/A"
+
+            high_display = f"₹ {high_52w:.2f}" if isinstance(high_52w, (int, float)) else "N/A"
+            low_display = f"₹ {low_52w:.2f}" if isinstance(low_52w, (int, float)) else "N/A"
+
             # --- UI: Top Dashboard Metrics ---
             st.subheader(f"📊 {company_name} ({sector})")
             col1, col2, col3 = st.columns(3)
             with col1:
                 st.metric(label="Current Close Price", value=f"₹ {current_price:.2f}", delta=f"{price_change:.2f} ({percentage_change:.2f}%)")
             with col2:
-                st.metric(label="52-Week High", value=f"₹ {stock_info.get('fiftyTwoWeekHigh', 'N/A')}")
+                st.metric(label="52-Week High", value=high_display)
             with col3:
-                st.metric(label="52-Week Low", value=f"₹ {stock_info.get('fiftyTwoWeekLow', 'N/A')}")
+                st.metric(label="52-Week Low", value=low_display)
             
             st.divider()
             
@@ -286,13 +297,13 @@ if st.sidebar.button("Analyze & Predict"):
                 consensus_score -= 1
 
             if consensus_score >= 3:
-                verdict, color = "STRONG BUY 📈", "green"
+                verdict, color = "STRONG BUY 📈", "lightgreen"
             elif consensus_score in [1, 2]:
-                verdict, color = "BUY / ACCUMULATE 🛒", "lightgreen"
+                verdict, color = "BUY / ACCUMULATE 🛒", "lightblue"
             elif consensus_score == 0:
                 verdict, color = "HOLD / NEUTRAL ⏳", "orange"
             elif consensus_score in [-1, -2]:
-                verdict, color = "SELL / REDUCE 📉", "salmon"
+                verdict, color = "SELL / REDUCE 📉", "lightcoral"
             else:
                 verdict, color = "STRONG SELL 🚨", "red"
 
@@ -313,5 +324,5 @@ if st.sidebar.button("Analyze & Predict"):
                     unsafe_allow_html=True
                 )
                 
-
             st.caption("\n\n*⚠️ **Disclaimer**: This summary is generated algorithmically based on technical indicators and AI models. Stock markets are highly volatile and influenced by unpredictable real-world news. Do not use this as your sole basis for financial trading or investment.*")
+            
