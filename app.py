@@ -10,6 +10,7 @@ from ta.trend import MACD
 from sklearn.preprocessing import MinMaxScaler
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import LSTM, Dense
+from sklearn.metrics import mean_absolute_error, mean_squared_error
 
 # --- Web Page Config ---
 st.set_page_config(page_title="Indian Stock AI Predictor", layout="wide")
@@ -67,6 +68,13 @@ else:
     ticker = st.sidebar.text_input("Enter Ticker Symbol:", value="ZOMATO.NS").upper()
 
 period = st.sidebar.selectbox("Select Historical Data Period:", ["3mo", "6mo", "1y", "2y", "5y"], index=1)
+
+backtest_days = st.sidebar.slider(
+    "Backtest Period (Days)",
+    min_value=30,
+    max_value=180,
+    value=60
+)
 
 # --- Analysis & Prediction ---
 if st.sidebar.button("Analyze & Predict"):
@@ -199,65 +207,98 @@ if st.sidebar.button("Analyze & Predict"):
 
             st.divider()
 
-            # --- UI: LSTM Prediction Model ---
-            st.subheader("🤖 AI Trend & Price Prediction (LSTM)")
-            with st.spinner("Training Deep Learning Model on recent data... Please wait."):
-                
+            # --- UI: LSTM Prediction Model + Backtesting ---
+            st.subheader("🤖 AI Trend Prediction & Historical Backtest")
+
+            with st.spinner("Training AI Model and running backtest..."):
+
                 scaler = MinMaxScaler()
                 scaled_data = scaler.fit_transform(close_prices.values.reshape(-1, 1))
-
-                X, y = [], []
                 window_size = 60
-                
-                if len(scaled_data) <= window_size:
-                    st.warning("Not enough historical data to train the AI. Please select a longer time period.")
-                else:
-                    for i in range(window_size, len(scaled_data)):
-                        X.append(scaled_data[i-window_size:i, 0])
-                        y.append(scaled_data[i, 0])
 
-                    X = np.array(X)
-                    y = np.array(y)
-                    X = np.reshape(X, (X.shape[0], X.shape[1], 1))
+                if len(scaled_data) < (window_size + backtest_days):
+                    st.warning("Not enough historical data for backtesting. Select a longer period.")
+                    next_day_price = current_price
+                else:
+                    train_data = scaled_data[:-backtest_days]
+                    test_data = scaled_data[-(backtest_days + window_size):]
+
+                    X_train, y_train = [], []
+
+                    for i in range(window_size, len(train_data)):
+                        X_train.append(train_data[i-window_size:i, 0])
+                        y_train.append(train_data[i, 0])
+
+                    X_train = np.array(X_train)
+                    y_train = np.array(y_train)
+                    X_train = X_train.reshape((X_train.shape[0], X_train.shape[1], 1))
 
                     model = Sequential([
-                        LSTM(50, return_sequences=True, input_shape=(X.shape[1], 1)),
+                        LSTM(50, return_sequences=True, input_shape=(window_size, 1)),
                         LSTM(50),
                         Dense(1)
                     ])
-                    model.compile(optimizer='adam', loss='mse')
-                    model.fit(X, y, epochs=5, batch_size=32, verbose=0) 
 
-                    # Predictions
-                    predictions = model.predict(X)
-                    predictions = scaler.inverse_transform(predictions)
+                    model.compile(optimizer="adam", loss="mse")
+                    model.fit(X_train, y_train, epochs=5, batch_size=32, verbose=0)
 
-                    # Next Day Prediction
+                    X_test, y_test = [], []
+
+                    for i in range(window_size, len(test_data)):
+                        X_test.append(test_data[i-window_size:i, 0])
+                        y_test.append(test_data[i, 0])
+
+                    X_test = np.array(X_test)
+                    y_test = np.array(y_test)
+                    X_test = X_test.reshape((X_test.shape[0], X_test.shape[1], 1))
+
+                    predicted = model.predict(X_test, verbose=0)
+                    predicted = scaler.inverse_transform(predicted)
+                    actual = scaler.inverse_transform(y_test.reshape(-1, 1))
+
+                    mae = mean_absolute_error(actual, predicted)
+                    rmse = np.sqrt(mean_squared_error(actual, predicted))
+                    accuracy = 100 - (np.mean(np.abs((actual - predicted) / actual)) * 100)
+
+                    st.subheader("📊 Historical Prediction Accuracy")
+
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.metric("Accuracy %", f"{accuracy:.2f}%")
+                    with col2:
+                        st.metric("MAE", f"₹ {mae:.2f}")
+                    with col3:
+                        st.metric("RMSE", f"₹ {rmse:.2f}")
+
+                    fig_bt, ax_bt = plt.subplots(figsize=(12, 5))
+                    test_dates = close_prices.index[-backtest_days:]
+
+                    ax_bt.plot(test_dates, actual, label="Actual Price", linewidth=2)
+                    ax_bt.plot(test_dates, predicted, label="Predicted Price", linestyle="--")
+
+                    ax_bt.set_title(f"{ticker} Historical Backtest")
+                    ax_bt.set_ylabel("Price (INR)")
+                    ax_bt.legend()
+                    ax_bt.grid(alpha=0.3)
+                    st.pyplot(fig_bt)
+
+                    st.divider()
+
                     last_60_days = scaled_data[-window_size:]
-                    next_day_input = np.reshape(last_60_days, (1, window_size, 1))
-                    next_day_scaled = model.predict(next_day_input)
-                    next_day_price = scaler.inverse_transform(next_day_scaled)[0][0]
-                    
-                    p_col1, p_col2 = st.columns(2)
-                    with p_col1:
-                        st.info(f"**Last Actual Close:** ₹ {current_price:.2f}")
-                    with p_col2:
-                        pred_color = "🟢" if next_day_price > current_price else "🔴"
-                        st.success(f"{pred_color} **AI Predicted Next Close:** ₹ {next_day_price:.2f}")
+                    next_input = np.reshape(last_60_days, (1, window_size, 1))
+                    next_scaled = model.predict(next_input, verbose=0)
+                    next_day_price = scaler.inverse_transform(next_scaled)[0][0]
 
-                    # Plotting Predictions
-                    fig3, ax3 = plt.subplots(figsize=(12, 5))
-                    valid_dates = close_prices.index[window_size:]
-                    actual_prices = close_prices.values[window_size:]
-                    
-                    ax3.plot(valid_dates, actual_prices, label="Actual Price", color='blue')
-                    ax3.plot(valid_dates, predictions, label="LSTM Model Fit", color='orange', linestyle='dashed')
-                    ax3.set_title(f"{ticker} Actual Price vs AI Model Fit")
-                    ax3.set_ylabel("Price (INR)")
-                    ax3.legend()
-                    ax3.grid(alpha=0.3)
-                    st.pyplot(fig3)
+                    st.subheader("🔮 Next Trading Day Forecast")
 
+                    p1, p2 = st.columns(2)
+                    with p1:
+                        st.info(f"Last Actual Close: ₹ {current_price:.2f}")
+                    with p2:
+                        if next_day_price > current_price:
+                            st.success(f"🟢 Predicted Next Close: ₹ {next_day_price:.2f}")
+                        else:
+                            st.error(f"🔴 Predicted Next Close: ₹ {next_day_price:.2f}")
             st.divider()
 
             # --- UI: ACTIONABLE TRADING SUMMARY ---
@@ -329,4 +370,4 @@ if st.sidebar.button("Analyze & Predict"):
                 )
                 
             st.caption("\n\n*⚠️ **Disclaimer**: This summary is generated algorithmically based on technical indicators and AI models. Stock markets are highly volatile and influenced by unpredictable real-world news. Do not use this as your sole basis for financial trading or investment.*")
-            
+
